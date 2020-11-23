@@ -48,30 +48,20 @@ object BracketRequestResponseMiddleware {
   )(release: (A, ExitCase[Throwable]) => F[Unit])(implicit F: Concurrent[F]): ContextMiddleware[F, A] =
     (contextService: Kleisli[OptionT[F, *], ContextRequest[F, A], Response[F]]) =>
       Kleisli((request: Request[F]) =>
-        OptionT
-          .liftF(
-            acquire.flatMap(a =>
-              atMostOnce_[F, Kleisli[F, (A, ExitCase[Throwable]), *], Unit](
-                Kleisli { case (a, ec) =>
-                  release(a, ec)
-                }
-              ).map(releaseK => (a, releaseK))
-            )
+        OptionT(
+          acquire.flatMap((a: A) =>
+            contextService(ContextRequest(a, request))
+              .foldF(release(a, ExitCase.Completed) *> F.pure(None: Option[Response[F]]))(response =>
+                F.pure(Some(response.copy(body = response.body.onFinalizeCaseWeak(ec => release(a, ec)))))
+              )
+              .guaranteeCase {
+                case ExitCase.Completed =>
+                  F.unit
+                case otherwise =>
+                  release(a, otherwise)
+              }
           )
-          .flatMap { case (a, release) =>
-            OptionT(
-              contextService(ContextRequest(a, request))
-                .foldF(release.run((a, ExitCase.Completed)) *> F.pure(None: Option[Response[F]]))(response =>
-                  F.pure(Some(response.copy(body = response.body.onFinalizeCaseWeak(ec => release.run((a, ec))))))
-                )
-                .guaranteeCase {
-                  case ExitCase.Completed =>
-                    F.unit
-                  case otherwise =>
-                    release.run((a, otherwise))
-                }
-            )
-          }
+        )
       )
 
   /** As [[#bracketRequestResponseCase]], but `release` is simplified, ignoring
