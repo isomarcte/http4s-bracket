@@ -1,4 +1,5 @@
 target/
+project/project
 *~
 
 # doc site stuff
@@ -6,3 +7,5 @@ target/
 
 !/website/siteConfig.js
 !/website/core/Footer.js
+
+metals.sbt
